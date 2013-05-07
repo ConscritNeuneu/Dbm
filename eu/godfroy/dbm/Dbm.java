@@ -8,12 +8,35 @@ class PagPage
 {
 	private static final int PAGFILE_PGSZ = 1024;
 
+	private static class Datum
+	{
+		public final byte[] content;
+
+		public Datum(byte[] data)
+		{
+			content = data;
+		}
+
+		public boolean equals(Object otherObject)
+		{
+			if (otherObject instanceof Datum)
+				return Arrays.equals(content, ((Datum) otherObject).content);
+
+			return false;
+		}
+
+		public int hashCode()
+		{
+			return Arrays.hashCode(content);
+		}
+	};
+
 	private final RandomAccessFile pagFile;
 	private final long pagNum;
 	/* in octets : 2 + Sum_entries( 4 + key.length + data.lenght ) */
 	private int totalSize;
 	private boolean isDirty;
-	private final Map<byte[],byte[]> keyMap;
+	private final Map<Datum,Datum> keyMap;
 
 	public PagPage(RandomAccessFile pagFile, long pagNum)
 	throws IOException
@@ -22,7 +45,7 @@ class PagPage
 		this.pagNum = pagNum;
 		totalSize = 2;
 		isDirty = false;
-		keyMap = new HashMap<byte[],byte[]>();
+		keyMap = new HashMap<Datum,Datum>();
 
 		byte[] content = new byte[PAGFILE_PGSZ];
 		pagFile.seek(pagNum * PAGFILE_PGSZ);
@@ -44,7 +67,7 @@ class PagPage
 				if (i % 2 == 0)
 					currentKey = data;
 				else
-					keyMap.put(currentKey, data);
+					keyMap.put(new Datum(currentKey),new Datum(data));
 
 				lastPosition = nextPosition;
 				totalSize += data.length + 2;
@@ -65,16 +88,16 @@ class PagPage
 		
 		contentBuf.putShort((short) (keyMap.size() * 2));
 		int lastPosition = PAGFILE_PGSZ;
-		for (Map.Entry<byte[],byte[]> pair : keyMap.entrySet())
+		for (Map.Entry<Datum,Datum> pair : keyMap.entrySet())
 		{
 			for (int i = 0; i < 2; i++)
 			{
 				byte[] data;
 
 				if (i % 2 == 0)
-					data = pair.getKey();
+					data = pair.getKey().content;
 				else
-					data = pair.getValue();
+					data = pair.getValue().content;
 
 				int nextPosition = lastPosition - data.length;
 				System.arraycopy(data, 0, content, nextPosition, data.length);
@@ -90,17 +113,17 @@ class PagPage
 
 	public byte[] fetchKey(byte[] key)
 	{
-		return keyMap.get(key);
+		return keyMap.get(new Datum(key)).content;
 	}
 
 	public boolean writeKey(byte[] key, byte[] value)
 	{
-		byte[] originalValue = keyMap.get(key);
+		byte[] originalValue = keyMap.get(new Datum(key)).content;
 		if (originalValue != null)
 		{
 			if (totalSize - originalValue.length + value.length <= PAGFILE_PGSZ)
 			{
-				keyMap.put(key, value);
+				keyMap.put(new Datum(key), new Datum(value));
 				totalSize += value.length - originalValue.length;
 				isDirty = true;
 				return true;
@@ -110,7 +133,7 @@ class PagPage
 		{
 			if (totalSize + 4 + key.length + value.length <= PAGFILE_PGSZ)
 			{
-				keyMap.put(key, value);
+				keyMap.put(new Datum(key), new Datum(value));
 				totalSize += 4 + key.length + value.length;
 				isDirty = true;
 				return true;
@@ -203,13 +226,5 @@ public class Dbm
 		}
 
 		return hashl;
-	}
-
-	public static void main(String[] args)
-	throws IOException
-	{
-		RandomAccessFile pagFile = new RandomAccessFile("phones.pag", "rw");
-		PagPage page = new PagPage(pagFile, 0l);
-		page.writePage();
 	}
 }
