@@ -6,7 +6,7 @@ import java.util.*;
 
 class PagPage
 {
-	private static final int PAGFILE_PGSZ = 1024;
+	public static final int PAGFILE_PGSZ = 1024;
 
 	private static class Datum
 	{
@@ -82,33 +82,36 @@ class PagPage
 	public void writePage()
 	throws IOException
 	{
-		byte[] content = new byte[PAGFILE_PGSZ];
-		ByteBuffer contentBuf = ByteBuffer.wrap(content);
-		contentBuf.order(ByteOrder.LITTLE_ENDIAN);
-		
-		contentBuf.putShort((short) (keyMap.size() * 2));
-		int lastPosition = PAGFILE_PGSZ;
-		for (Map.Entry<Datum,Datum> pair : keyMap.entrySet())
+		if (isDirty)
 		{
-			for (int i = 0; i < 2; i++)
+			byte[] content = new byte[PAGFILE_PGSZ];
+			ByteBuffer contentBuf = ByteBuffer.wrap(content);
+			contentBuf.order(ByteOrder.LITTLE_ENDIAN);
+
+			contentBuf.putShort((short) (keyMap.size() * 2));
+			int lastPosition = PAGFILE_PGSZ;
+			for (Map.Entry<Datum,Datum> pair : keyMap.entrySet())
 			{
-				byte[] data;
+				for (int i = 0; i < 2; i++)
+				{
+					byte[] data;
 
-				if (i % 2 == 0)
-					data = pair.getKey().content;
-				else
-					data = pair.getValue().content;
+					if (i % 2 == 0)
+						data = pair.getKey().content;
+					else
+						data = pair.getValue().content;
 
-				int nextPosition = lastPosition - data.length;
-				System.arraycopy(data, 0, content, nextPosition, data.length);
-				contentBuf.putShort((short) nextPosition);
+					int nextPosition = lastPosition - data.length;
+					System.arraycopy(data, 0, content, nextPosition, data.length);
+					contentBuf.putShort((short) nextPosition);
 
-				lastPosition = nextPosition;
+					lastPosition = nextPosition;
+				}
 			}
+			pagFile.seek(pagNum * PAGFILE_PGSZ);
+			pagFile.write(content);
+			isDirty = false;
 		}
-		pagFile.seek(pagNum * PAGFILE_PGSZ);
-		pagFile.write(content);
-		isDirty = false;
 	}
 
 	public byte[] fetchKey(byte[] key)
@@ -150,12 +153,49 @@ class PagPage
 	}
 }
 
+class DirPage
+{
+	public static final int DIRFILE_PGSZ = 4096;
+
+	private final RandomAccessFile dirFile;
+	private final long pagNum;
+	private boolean isDirty;
+	private final byte[] data;
+
+	public DirPage(RandomAccessFile dirFile, long pagNum)
+	throws IOException
+	{
+		this.dirFile = dirFile;
+		this.pagNum = pagNum;
+		isDirty = false;
+
+		data = new byte[DIRFILE_PGSZ];
+		dirFile.seek(pagNum * DIRFILE_PGSZ);
+		try
+		{
+			dirFile.readFully(data);
+		}
+		catch (EOFException exception)
+		{
+			;
+		}
+	}
+
+	public void writePage()
+	throws IOException
+	{
+		if (isDirty)
+		{
+			dirFile.seek(pagNum * DIRFILE_PGSZ);
+			dirFile.write(data);
+		}
+	}
+}
+
 public class Dbm
 {
 	private static final String PAG_EXT = ".pag";
 	private static final String DIR_EXT = ".dir";
-
-	private static final int DIRFILE_PGSZ = 4096;
 
 	private final RandomAccessFile pagFile;
 	private final RandomAccessFile dirFile;
@@ -168,23 +208,6 @@ public class Dbm
 
 		pagFile = new RandomAccessFile(pagF, "rw");
 		dirFile = new RandomAccessFile(dirF, "rw");
-	}
-
-	private byte[] readDirPage(long pagNum)
-	throws IOException
-	{
-		byte[] page = new byte[DIRFILE_PGSZ];
-		dirFile.seek(pagNum * DIRFILE_PGSZ);
-		try
-		{
-			dirFile.readFully(page);
-		}
-		catch (EOFException exception)
-		{
-			;
-		}
-
-		return page;
 	}
 
 	private static byte[] hitab = new byte[] {
