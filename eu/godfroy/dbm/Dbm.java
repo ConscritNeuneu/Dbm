@@ -430,7 +430,7 @@ public class Dbm
 
 			int hash = computeHash(key);
 			long page = (hash & newMask) & 0xffffffffl;
-			if (page != pagNum || page != newPagNum)
+			if (page != pagNum && page != newPagNum)
 			{
 				/* replace this by an exception */
 				System.err.println("Au secours!");
