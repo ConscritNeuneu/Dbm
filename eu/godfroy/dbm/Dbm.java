@@ -470,6 +470,7 @@ public class Dbm
 		{
 			splitPage(mask, hash & mask);
 			mask = (mask << 1) + 1;
+			pagPage = getPagPage(hash & mask);
 		}
 		if (mask == -1)
 			throw new IllegalArgumentException("Cannot insert key!");
