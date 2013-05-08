@@ -281,6 +281,8 @@ class DirPage
 			throw new IllegalArgumentException("Wrong DirPage!");
 
 		data[(int) localBit/8] |= (1 << (localBit % 8));
+
+		isDirty = true;
 	}
 }
 
