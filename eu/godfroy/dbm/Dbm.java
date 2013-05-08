@@ -135,13 +135,13 @@ class PagPage
 		if (key.length + value.length + 6 > PAGFILE_PGSZ)
 			throw new IllegalArgumentException("Will never be able to insert: key+value too long!");
 
-		byte[] originalValue = keyMap.get(new Datum(key)).content;
+		Datum originalValue = keyMap.get(new Datum(key));
 		if (originalValue != null)
 		{
-			if (totalSize - originalValue.length + value.length <= PAGFILE_PGSZ)
+			if (totalSize - originalValue.content.length + value.length <= PAGFILE_PGSZ)
 			{
 				keyMap.put(new Datum(key), new Datum(value));
-				totalSize += value.length - originalValue.length;
+				totalSize += value.length - originalValue.content.length;
 				isDirty = true;
 				return true;
 			}
@@ -471,5 +471,7 @@ public class Dbm
 		}
 		if (mask == -1)
 			throw new IllegalArgumentException("Cannot insert key!");
+		else
+			pagPage.writePage();
 	}
 }
