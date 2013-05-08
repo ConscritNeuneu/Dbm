@@ -132,6 +132,9 @@ class PagPage
 
 	public boolean writeKey(byte[] key, byte[] value)
 	{
+		if (key.length + value.length + 6 > PAGFILE_PGSZ)
+			throw new IllegalArgumentException("Will never be able to insert: key+value too long!");
+
 		byte[] originalValue = keyMap.get(new Datum(key)).content;
 		if (originalValue != null)
 		{
@@ -156,6 +159,54 @@ class PagPage
 
 		/* need split */
 		return false;
+	}
+
+	public void removeKey(byte[] key)
+	{
+		Datum datum = new Datum(key);
+		if (keyMap.containsKey(datum))
+		{
+			byte[] value = keyMap.remove(datum).content;
+			totalSize -= 4 + key.length + value.length;
+			isDirty = true;
+		}
+	}
+
+	public Iterable<byte[]> getAllKeys()
+	{
+		Set<Datum> keySet = keyMap.keySet();
+		final Iterator<Datum> internalIterator = keySet.iterator();
+
+		return new Iterable<byte[]>()
+		{
+			public Iterator<byte[]> iterator()
+			{
+				return new Iterator<byte[]>()
+				{
+					public boolean hasNext()
+					{
+						return internalIterator.hasNext();
+					}
+
+					public byte[] next()
+					{
+						return internalIterator.next().content;
+					}
+
+					public void remove()
+					{
+						throw new UnsupportedOperationException("Cannot remove a key this way!");
+					}
+				};
+			}
+		};
+	}
+
+	public void clear()
+	{
+		totalSize = 2;
+		keyMap.clear();
+		isDirty = true;
 	}
 
 	public boolean isDirty()
@@ -220,6 +271,16 @@ class DirPage
 			throw new IllegalArgumentException("Wrong DirPage!");
 
 		return ((((data[(int) localBit/8])>>(localBit%8))&1) == 1);
+	}
+
+	public void setBit(long bitNum)
+	{
+		long localBit = bitNum - pagNum * DIRFILE_PGSZ * 8;
+
+		 if (localBit < 0 || localBit >= DIRFILE_PGSZ * 8)
+			throw new IllegalArgumentException("Wrong DirPage!");
+
+		data[(int) localBit/8] |= (1 << (localBit % 8));
 	}
 }
 
@@ -319,5 +380,96 @@ public class Dbm
 		}
 
 		return page;
+	}
+
+	private boolean isSplit(int mask, long pagNum)
+	throws IOException
+	{
+		long bitNum = (mask & 0xffffffffl) + pagNum;
+		DirPage page = getDirPage(bitNum / (8 * DirPage.DIRFILE_PGSZ));
+		return page.getBit(bitNum);
+	}
+
+	private void markSplit(int mask, long pagNum)
+	throws IOException
+	{
+		long bitNum = (mask & 0xffffffffl) + pagNum;
+		DirPage page = getDirPage(bitNum / (8 * DirPage.DIRFILE_PGSZ));
+		page.setBit(bitNum);
+		page.writePage();
+	}
+
+	private void splitPage(int mask, long pagNum)
+	throws IOException
+	{
+		if (mask == -1)
+			throw new IllegalArgumentException("Cannot split anymore!");
+
+		PagPage pagPage = getPagPage(pagNum);
+		long newPagNum = pagNum | ((mask + 1) & 0xffffffffl);
+		PagPage newPagPage = getPagPage(newPagNum);
+
+		List<byte[]> keys = new ArrayList<byte[]>();
+		List<byte[]> values = new ArrayList<byte[]>();
+		for (byte[] key : pagPage.getAllKeys())
+		{
+			byte[] value = pagPage.fetchKey(key);
+			keys.add(key);
+			values.add(value);
+		}
+		pagPage.clear();
+
+		int newMask = (mask << 1) + 1;
+
+		for (int i = 0; i < keys.size(); i++)
+		{
+			byte[] key = keys.get(i);
+			byte[] value = values.get(i);
+
+			int hash = computeHash(key);
+			long page = (hash & newMask) & 0xffffffffl;
+			if (page != pagNum || page != newPagNum)
+			{
+				/* replace this by an exception */
+				System.err.println("Au secours!");
+				System.exit(1);
+			}
+			if (page == pagNum)
+				pagPage.writeKey(key, value);
+			else
+				newPagPage.writeKey(key, value);
+		}
+
+		markSplit(mask, pagNum);
+		pagPage.writePage();
+		newPagPage.writePage();
+	}
+
+	public byte[] get(byte[] key)
+	throws IOException
+	{
+		int mask = 0;
+		int hash = computeHash(key);
+		while (isSplit(mask, hash & mask))
+			mask = (mask << 1) + 1;
+		PagPage pagPage = getPagPage(hash & mask);
+		return pagPage.fetchKey(key);
+	}
+
+	public void put(byte[] key, byte[] value)
+	throws IOException
+	{
+		int mask = 0;
+		int hash = computeHash(key);
+		while (isSplit(mask, hash & mask))
+			mask = (mask << 1) + 1;
+		PagPage pagPage = getPagPage(hash & mask);
+		while (!pagPage.writeKey(key, value) && mask != -1)
+		{
+			splitPage(mask, hash & mask);
+			mask = (mask << 1) + 1;
+		}
+		if (mask == -1)
+			throw new IllegalArgumentException("Cannot insert key!");
 	}
 }
