@@ -1,5 +1,6 @@
 package eu.godfroy.dbm;
 
+import java.lang.ref.*;
 import java.io.*;
 import java.nio.*;
 import java.util.*;
@@ -108,10 +109,20 @@ class PagPage
 					lastPosition = nextPosition;
 				}
 			}
-			pagFile.seek(pagNum * PAGFILE_PGSZ);
-			pagFile.write(content);
+			synchronized(pagFile)
+			{
+				pagFile.seek(pagNum * PAGFILE_PGSZ);
+				pagFile.write(content);
+			}
 			isDirty = false;
 		}
+	}
+
+	protected void finalize()
+	throws Throwable
+	{
+		writePage();
+		super.finalize();
 	}
 
 	public byte[] fetchKey(byte[] key)
@@ -186,9 +197,29 @@ class DirPage
 	{
 		if (isDirty)
 		{
-			dirFile.seek(pagNum * DIRFILE_PGSZ);
-			dirFile.write(data);
+			synchronized(dirFile)
+			{
+				dirFile.seek(pagNum * DIRFILE_PGSZ);
+				dirFile.write(data);
+			}
 		}
+	}
+
+	protected void finalize()
+	throws Throwable
+	{
+		writePage();
+		super.finalize();
+	}
+
+	public boolean getBit(long bitNum)
+	{
+		long localBit = bitNum - pagNum * DIRFILE_PGSZ * 8;
+
+		if (localBit < 0 || localBit >= DIRFILE_PGSZ * 8)
+			throw new IllegalArgumentException("Wrong DirPage!");
+
+		return ((((data[(int) localBit/8])>>(localBit%8))&1) == 1);
 	}
 }
 
@@ -200,6 +231,10 @@ public class Dbm
 	private final RandomAccessFile pagFile;
 	private final RandomAccessFile dirFile;
 
+	/* also hold a PhantomReference to clear the mapping */
+	private final Map<Long,Reference<PagPage>> pagPages;
+	private final Map<Long,Reference<DirPage>> dirPages;
+
 	public Dbm(String database)
 	throws IOException
 	{
@@ -208,6 +243,9 @@ public class Dbm
 
 		pagFile = new RandomAccessFile(pagF, "rw");
 		dirFile = new RandomAccessFile(dirF, "rw");
+
+		pagPages = new TreeMap<Long,Reference<PagPage>>();
+		dirPages = new TreeMap<Long,Reference<DirPage>>();
 	}
 
 	private static byte[] hitab = new byte[] {
@@ -249,5 +287,37 @@ public class Dbm
 		}
 
 		return hashl;
+	}
+
+	private PagPage getPagPage(long pagNum)
+	throws IOException
+	{
+		PagPage page = null;
+		Reference<PagPage> ref = pagPages.get(pagNum);
+		if (ref != null)
+			page = ref.get();
+		if (page == null)
+		{
+			page = new PagPage(pagFile, pagNum);
+			pagPages.put(pagNum, new SoftReference<PagPage>(page));
+		}
+
+		return page;
+	}
+
+	private DirPage getDirPage(long pagNum)
+	throws IOException
+	{
+		DirPage page = null;
+		Reference<DirPage> ref = dirPages.get(pagNum);
+		if (ref != null)
+			page = ref.get();
+		if (page == null)
+		{
+			page = new DirPage(dirFile, pagNum);
+			dirPages.put(pagNum, new SoftReference<DirPage>(page));
+		}
+
+		return page;
 	}
 }
