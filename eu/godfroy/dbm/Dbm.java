@@ -73,7 +73,7 @@ class PagPage
 				lastPosition = nextPosition;
 				totalSize += data.length + 2;
 			}
-		} 
+		}
 		catch (EOFException exception)
 		{
 			;
