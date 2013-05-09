@@ -34,7 +34,7 @@ class PagPage
 
 	private final RandomAccessFile pagFile;
 	private final long pagNum;
-	/* in octets : 2 + Sum_entries( 4 + key.length + data.lenght ) */
+	/* in octets : 2 + Sum_entries( 4 + key.length + data.length ) */
 	private int totalSize;
 	private boolean isDirty;
 	private final Map<Datum,Datum> keyMap;
