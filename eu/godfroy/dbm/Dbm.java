@@ -477,4 +477,57 @@ public class Dbm
 		else
 			pagPage.writePage();
 	}
+
+	public class AllKeysGetter
+	{
+		private int hash;
+		private int mask;
+		private Iterator<byte[]> pageIterator;
+
+		private AllKeysGetter()
+		throws IOException
+		{
+			while (isSplit(mask, hash & mask))
+				mask = (mask << 1) + 1;
+			pageIterator = getPagPage(hash & mask).getAllKeys().iterator();
+		}
+
+		public byte[] nextKey()
+		throws IOException
+		{
+			while (!pageIterator.hasNext())
+			{
+				if ((hash | ~mask) == -1)
+					return null;
+
+				/* set the highest possible bit which isn't
+				 * already set, but within the mask. The
+				 * higher bits are not important since the
+				 * page wasn't split */
+				hash &= mask;
+				int bit = (mask + 1) >> 1;
+				while ((hash & bit) != 0)
+				{
+					hash &= ~bit;
+					bit >>= 1;
+				}
+				hash |= bit;
+				/* set the mask to this value, no need to
+				 * reset it to 0, the lower bits are used
+				 * for sure */
+				mask = (bit << 1) - 1;
+				while (isSplit(mask, hash & mask))
+					mask = (mask << 1) + 1;
+
+				pageIterator = getPagPage(hash & mask).getAllKeys().iterator();
+			}
+			return pageIterator.next();
+		}
+	}
+
+	public AllKeysGetter getAll()
+	throws IOException
+	{
+		return new AllKeysGetter();
+	}
 }
