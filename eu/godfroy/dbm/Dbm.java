@@ -402,7 +402,8 @@ public class Dbm
 	}
 
 	private void splitPage(int mask, long pagNum)
-	throws IOException
+	throws IOException,
+	       DBException
 	{
 		if (mask == -1)
 			throw new IllegalArgumentException("Cannot split anymore!");
@@ -431,11 +432,7 @@ public class Dbm
 			int hash = computeHash(key);
 			long page = (hash & newMask) & 0xffffffffl;
 			if (page != pagNum && page != newPagNum)
-			{
-				/* replace this by an exception */
-				System.err.println("Au secours!");
-				System.exit(1);
-			}
+				throw new CorruptedDBException("Content pair is not in right page!");
 			if (page == pagNum)
 				pagPage.writeKey(key, value);
 			else
@@ -459,7 +456,8 @@ public class Dbm
 	}
 
 	public void put(byte[] key, byte[] value)
-	throws IOException
+	throws IOException,
+	       DBException
 	{
 		int mask = 0;
 		int hash = computeHash(key);
