@@ -505,7 +505,11 @@ public class Dbm
 				 * higher bits are not important since the
 				 * page wasn't split */
 				hash &= mask;
-				int bit = (mask + 1) >> 1;
+				int bit;
+				if (mask != -1)
+					bit = (mask + 1) >> 1;
+				else
+					bit = 1 << 31;
 				while ((hash & bit) != 0)
 				{
 					hash &= ~bit;
