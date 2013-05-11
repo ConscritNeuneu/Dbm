@@ -494,7 +494,7 @@ public class Dbm
 		return data;
 	}
 
-	public class AllKeysGetter
+	private class AllKeysGetter
 	{
 		private int hash;
 		private int mask;
@@ -545,9 +545,75 @@ public class Dbm
 		}
 	}
 
-	public AllKeysGetter getAll()
-	throws IOException
+	/* returns a IOException as a cause of an unchecked DBIOException */
+	public Iterable<byte[]> allKeys()
 	{
-		return new AllKeysGetter();
+		return new Iterable<byte[]>()
+		{
+			public Iterator<byte[]> iterator()
+			{
+				return new Iterator<byte[]>()
+				{
+					boolean isNextKey;
+					byte[] nextKey;
+					final AllKeysGetter getter;
+
+					{
+						try
+						{
+							getter = new AllKeysGetter();
+						}
+						catch (IOException exception)
+						{
+							throw new DBIOException(exception);
+						}
+					}
+
+					public boolean hasNext()
+					{
+						if (!isNextKey)
+						{
+							try
+							{
+								nextKey = getter.nextKey();
+							}
+							catch (IOException exception)
+							{
+								throw new DBIOException(exception);
+							}
+							isNextKey = true;
+						}
+
+						return nextKey != null;
+					}
+
+					public byte[] next()
+					{
+						if (!isNextKey)
+						{
+							try
+							{
+								nextKey = getter.nextKey();
+							}
+							catch (IOException exception)
+							{
+								throw new DBIOException(exception);
+							}
+						}
+
+						if (nextKey == null)
+							throw new NoSuchElementException();
+
+						isNextKey = false;
+						return nextKey;
+					}
+
+					public void remove()
+					{
+						throw new UnsupportedOperationException("Cannot remove a key this way!");
+					}
+				};
+			}
+		};
 	}
 }
