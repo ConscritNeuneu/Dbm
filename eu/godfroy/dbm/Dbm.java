@@ -40,8 +40,7 @@ class PagPage
 	private final Map<Datum,Datum> keyMap;
 
 	public PagPage(RandomAccessFile pagFile, long pagNum)
-	throws IOException,
-	       DBException
+	throws DBException
 	{
 		this.pagFile = pagFile;
 		this.pagNum = pagNum;
@@ -50,45 +49,52 @@ class PagPage
 		keyMap = new HashMap<Datum,Datum>();
 
 		byte[] content = new byte[PAGFILE_PGSZ];
-		pagFile.seek(pagNum * PAGFILE_PGSZ);
 		try
 		{
-			pagFile.readFully(content);
-			ByteBuffer contentBuf = ByteBuffer.wrap(content);
-			contentBuf.order(ByteOrder.LITTLE_ENDIAN);
-
-			int elements = contentBuf.getShort();
-			int lastPosition = PAGFILE_PGSZ;
-			byte[] currentKey = null;
-			for (int i = 0; i < elements; i++)
+			pagFile.seek(pagNum * PAGFILE_PGSZ);
+			try
 			{
-				int nextPosition =  contentBuf.getShort();
-				byte[] data = new byte[lastPosition-nextPosition];
-				System.arraycopy(content, nextPosition, data, 0, data.length);
+				pagFile.readFully(content);
+				ByteBuffer contentBuf = ByteBuffer.wrap(content);
+				contentBuf.order(ByteOrder.LITTLE_ENDIAN);
 
-				if (i % 2 == 0)
-					currentKey = data;
-				else
-					keyMap.put(new Datum(currentKey),new Datum(data));
+				int elements = contentBuf.getShort();
+				int lastPosition = PAGFILE_PGSZ;
+				byte[] currentKey = null;
+				for (int i = 0; i < elements; i++)
+				{
+					int nextPosition =  contentBuf.getShort();
+					byte[] data = new byte[lastPosition-nextPosition];
+					System.arraycopy(content, nextPosition, data, 0, data.length);
 
-				lastPosition = nextPosition;
-				totalSize += data.length + 2;
+					if (i % 2 == 0)
+						currentKey = data;
+					else
+						keyMap.put(new Datum(currentKey),new Datum(data));
+
+					lastPosition = nextPosition;
+					totalSize += data.length + 2;
+				}
+			}
+			catch (EOFException exception)
+			{
+				;
+			}
+			catch (IndexOutOfBoundsException exception)
+			{
+				keyMap.clear();
+				totalSize = 2;
+				throw new CorruptedDBException("Corrupted page " + pagNum, exception);
 			}
 		}
-		catch (EOFException exception)
+		catch (IOException exception)
 		{
-			;
-		}
-		catch (IndexOutOfBoundsException exception)
-		{
-			keyMap.clear();
-			totalSize = 2;
-			throw new CorruptedDBException("Corrupted page " + pagNum, exception);
+			throw new IODBException(exception);
 		}
 	}
 
 	public void writePage()
-	throws IOException
+	throws DBException
 	{
 		if (isDirty)
 		{
@@ -116,10 +122,17 @@ class PagPage
 					lastPosition = nextPosition;
 				}
 			}
-			synchronized(pagFile)
+			try
 			{
-				pagFile.seek(pagNum * PAGFILE_PGSZ);
-				pagFile.write(content);
+				synchronized(pagFile)
+				{
+					pagFile.seek(pagNum * PAGFILE_PGSZ);
+					pagFile.write(content);
+				}
+			}
+			catch (IOException exception)
+			{
+				throw new IODBException(exception);
 			}
 			isDirty = false;
 		}
@@ -236,33 +249,47 @@ class DirPage
 	private final byte[] data;
 
 	public DirPage(RandomAccessFile dirFile, long pagNum)
-	throws IOException
+	throws DBException
 	{
 		this.dirFile = dirFile;
 		this.pagNum = pagNum;
 		isDirty = false;
 
 		data = new byte[DIRFILE_PGSZ];
-		dirFile.seek(pagNum * DIRFILE_PGSZ);
 		try
 		{
-			dirFile.readFully(data);
+			dirFile.seek(pagNum * DIRFILE_PGSZ);
+			try
+			{
+				dirFile.readFully(data);
+			}
+			catch (EOFException exception)
+			{
+				;
+			}
 		}
-		catch (EOFException exception)
+		catch (IOException exception)
 		{
-			;
+			throw new IODBException(exception);
 		}
 	}
 
 	public void writePage()
-	throws IOException
+	throws DBException
 	{
 		if (isDirty)
 		{
-			synchronized(dirFile)
+			try
 			{
-				dirFile.seek(pagNum * DIRFILE_PGSZ);
-				dirFile.write(data);
+				synchronized(dirFile)
+				{
+					dirFile.seek(pagNum * DIRFILE_PGSZ);
+					dirFile.write(data);
+				}
+			}
+			catch (IOException exception)
+			{
+				throw new IODBException(exception);
 			}
 		}
 	}
@@ -364,8 +391,7 @@ public class Dbm
 	}
 
 	private PagPage getPagPage(long pagNum)
-	throws IOException,
-	       DBException
+	throws DBException
 	{
 		PagPage page = null;
 		Reference<PagPage> ref = pagPages.get(pagNum);
@@ -381,7 +407,7 @@ public class Dbm
 	}
 
 	private DirPage getDirPage(long pagNum)
-	throws IOException
+	throws DBException
 	{
 		DirPage page = null;
 		Reference<DirPage> ref = dirPages.get(pagNum);
@@ -397,7 +423,7 @@ public class Dbm
 	}
 
 	private boolean isSplit(int mask, long pagNum)
-	throws IOException
+	throws DBException
 	{
 		long bitNum = (mask & 0xffffffffl) + pagNum;
 		DirPage page = getDirPage(bitNum / (8 * DirPage.DIRFILE_PGSZ));
@@ -405,7 +431,7 @@ public class Dbm
 	}
 
 	private void markSplit(int mask, long pagNum)
-	throws IOException
+	throws DBException
 	{
 		long bitNum = (mask & 0xffffffffl) + pagNum;
 		DirPage page = getDirPage(bitNum / (8 * DirPage.DIRFILE_PGSZ));
@@ -414,8 +440,7 @@ public class Dbm
 	}
 
 	private void splitPage(int mask, long pagNum)
-	throws IOException,
-	       DBException
+	throws DBException
 	{
 		if (mask == -1)
 			throw new InsertImpossibleException("Cannot split anymore!");
@@ -457,8 +482,7 @@ public class Dbm
 	}
 
 	public byte[] get(byte[] key)
-	throws IOException,
-	       DBException
+	throws DBException
 	{
 		int mask = 0;
 		int hash = computeHash(key);
@@ -469,8 +493,7 @@ public class Dbm
 	}
 
 	public void put(byte[] key, byte[] value)
-	throws IOException,
-	       DBException
+	throws DBException
 	{
 		int mask = 0;
 		int hash = computeHash(key);
@@ -490,8 +513,7 @@ public class Dbm
 	}
 
 	public byte[] remove(byte[] key)
-	throws IOException,
-	       DBException
+	throws DBException
 	{
 		int mask = 0;
 		int hash = computeHash(key);
@@ -511,8 +533,7 @@ public class Dbm
 		private Iterator<byte[]> pageIterator;
 
 		private AllKeysGetter()
-		throws IOException,
-		       DBException
+		throws DBException
 		{
 			while (isSplit(mask, hash & mask))
 				mask = (mask << 1) + 1;
@@ -520,8 +541,7 @@ public class Dbm
 		}
 
 		public byte[] nextKey()
-		throws IOException,
-		       DBException
+		throws DBException
 		{
 			while (!pageIterator.hasNext())
 			{
@@ -557,7 +577,7 @@ public class Dbm
 		}
 	}
 
-	/* returns a RuntimeException as a cause of an unchecked DBIOException */
+	/* returns a RuntimeException as a cause of an unchecked DBException */
 	public Iterable<byte[]> allKeys()
 	{
 		return new Iterable<byte[]>()
@@ -575,10 +595,6 @@ public class Dbm
 						{
 							getter = new AllKeysGetter();
 						}
-						catch (IOException exception)
-						{
-							throw new RuntimeException(exception);
-						}
 						catch (DBException exception)
 						{
 							throw new RuntimeException(exception);
@@ -592,10 +608,6 @@ public class Dbm
 							try
 							{
 								nextKey = getter.nextKey();
-							}
-							catch (IOException exception)
-							{
-								throw new RuntimeException(exception);
 							}
 							catch (DBException exception)
 							{
@@ -614,10 +626,6 @@ public class Dbm
 							try
 							{
 								nextKey = getter.nextKey();
-							}
-							catch (IOException exception)
-							{
-								throw new RuntimeException(exception);
 							}
 							catch (DBException exception)
 							{
