@@ -406,7 +406,7 @@ public class Dbm
 	       DBException
 	{
 		if (mask == -1)
-			throw new IllegalArgumentException("Cannot split anymore!");
+			throw new InsertImpossibleException("Cannot split anymore!");
 
 		PagPage pagPage = getPagPage(pagNum);
 		long newPagNum = pagNum | ((mask + 1) & 0xffffffffl);
