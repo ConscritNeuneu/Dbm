@@ -81,6 +81,8 @@ class PagPage
 		}
 		catch (IndexOutOfBoundsException exception)
 		{
+			keyMap.clear();
+			totalSize = 2;
 			throw new CorruptedDBException("Corrupted page " + pagNum, exception);
 		}
 	}
