@@ -161,15 +161,19 @@ class PagPage
 		return false;
 	}
 
-	public void removeKey(byte[] key)
+	public byte[] removeKey(byte[] key)
 	{
 		Datum datum = new Datum(key);
+
+		byte[] value = null;
 		if (keyMap.containsKey(datum))
 		{
-			byte[] value = keyMap.remove(datum).content;
+			value = keyMap.remove(datum).content;
 			totalSize -= 4 + key.length + value.length;
 			isDirty = true;
 		}
+
+		return value;
 	}
 
 	public Iterable<byte[]> getAllKeys()
@@ -471,9 +475,23 @@ public class Dbm
 			pagPage = getPagPage(hash & mask);
 		}
 		if (mask == -1)
-			throw new IllegalArgumentException("Cannot insert key!");
+			throw new InsertImpossibleException("Cannot insert key!");
 		else
 			pagPage.writePage();
+	}
+
+	public byte[] remove(byte[] key)
+	throws IOException
+	{
+		int mask = 0;
+		int hash = computeHash(key);
+		while (isSplit(mask, hash & mask))
+			mask = (mask << 1) + 1;
+		PagPage pagPage = getPagPage(hash & mask);
+		byte[] data = pagPage.removeKey(key);
+		if (data != null)
+			pagPage.writePage();
+		return data;
 	}
 
 	public class AllKeysGetter
