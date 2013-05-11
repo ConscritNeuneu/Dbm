@@ -40,7 +40,8 @@ class PagPage
 	private final Map<Datum,Datum> keyMap;
 
 	public PagPage(RandomAccessFile pagFile, long pagNum)
-	throws IOException
+	throws IOException,
+	       DBException
 	{
 		this.pagFile = pagFile;
 		this.pagNum = pagNum;
@@ -77,6 +78,10 @@ class PagPage
 		catch (EOFException exception)
 		{
 			;
+		}
+		catch (IndexOutOfBoundsException exception)
+		{
+			throw new CorruptedDBException("Corrupted page " + pagNum, exception);
 		}
 	}
 
@@ -357,7 +362,8 @@ public class Dbm
 	}
 
 	private PagPage getPagPage(long pagNum)
-	throws IOException
+	throws IOException,
+	       DBException
 	{
 		PagPage page = null;
 		Reference<PagPage> ref = pagPages.get(pagNum);
@@ -449,7 +455,8 @@ public class Dbm
 	}
 
 	public byte[] get(byte[] key)
-	throws IOException
+	throws IOException,
+	       DBException
 	{
 		int mask = 0;
 		int hash = computeHash(key);
@@ -481,7 +488,8 @@ public class Dbm
 	}
 
 	public byte[] remove(byte[] key)
-	throws IOException
+	throws IOException,
+	       DBException
 	{
 		int mask = 0;
 		int hash = computeHash(key);
@@ -501,7 +509,8 @@ public class Dbm
 		private Iterator<byte[]> pageIterator;
 
 		private AllKeysGetter()
-		throws IOException
+		throws IOException,
+		       DBException
 		{
 			while (isSplit(mask, hash & mask))
 				mask = (mask << 1) + 1;
@@ -509,7 +518,8 @@ public class Dbm
 		}
 
 		public byte[] nextKey()
-		throws IOException
+		throws IOException,
+		       DBException
 		{
 			while (!pageIterator.hasNext())
 			{
@@ -545,7 +555,7 @@ public class Dbm
 		}
 	}
 
-	/* returns a IOException as a cause of an unchecked DBIOException */
+	/* returns a RuntimeException as a cause of an unchecked DBIOException */
 	public Iterable<byte[]> allKeys()
 	{
 		return new Iterable<byte[]>()
@@ -565,7 +575,11 @@ public class Dbm
 						}
 						catch (IOException exception)
 						{
-							throw new DBIOException(exception);
+							throw new RuntimeException(exception);
+						}
+						catch (DBException exception)
+						{
+							throw new RuntimeException(exception);
 						}
 					}
 
@@ -579,7 +593,11 @@ public class Dbm
 							}
 							catch (IOException exception)
 							{
-								throw new DBIOException(exception);
+								throw new RuntimeException(exception);
+							}
+							catch (DBException exception)
+							{
+								throw new RuntimeException(exception);
 							}
 							isNextKey = true;
 						}
@@ -597,7 +615,11 @@ public class Dbm
 							}
 							catch (IOException exception)
 							{
-								throw new DBIOException(exception);
+								throw new RuntimeException(exception);
+							}
+							catch (DBException exception)
+							{
+								throw new RuntimeException(exception);
 							}
 						}
 
