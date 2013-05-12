@@ -10,6 +10,7 @@ class PagPage
 	public static final int PAGFILE_PGSZ = 1024;
 
 	private static class Datum
+	implements Comparable<Datum>
 	{
 		public final byte[] content;
 
@@ -29,6 +30,20 @@ class PagPage
 		public int hashCode()
 		{
 			return Arrays.hashCode(content);
+		}
+
+		public int compareTo(Datum otherDatum)
+		{
+			if (content.length != otherDatum.content.length)
+				return content.length - otherDatum.content.length;
+
+			for (int i = 0; i < content.length; i++)
+			{
+				if (content[i] != otherDatum.content[i])
+					return (content[i] - otherDatum.content[i]);
+			}
+
+			return 0;
 		}
 	};
 
@@ -225,6 +240,24 @@ class PagPage
 				};
 			}
 		};
+	}
+
+	public byte[] getNextKey(byte[] previousKey)
+	{
+		Datum previousKeyDatum = new Datum(previousKey);
+
+		Datum selectedNextDatum = null;
+		for (Datum otherKeyDatum : keyMap.keySet())
+		{
+			if (otherKeyDatum.compareTo(previousKeyDatum) > 0 &&
+			    (selectedNextDatum == null || otherKeyDatum.compareTo(selectedNextDatum) < 0))
+				selectedNextDatum = otherKeyDatum;
+		}
+
+		if (selectedNextDatum != null && selectedNextDatum != previousKeyDatum)
+			return selectedNextDatum.content;
+
+		return null;
 	}
 
 	public void clear()
@@ -527,6 +560,87 @@ public class Dbm
 		return data;
 	}
 
+	private static class HashMask
+	{
+		private final int hash;
+		private final int mask;
+
+		private HashMask(int hash, int mask)
+		{
+			this.hash = hash;
+			this.mask = mask;
+		}
+	}
+
+	private HashMask hashInc(int hash, int mask)
+	throws DBException
+	{
+		if ((hash | ~mask) == -1)
+			return null;
+
+		/* set the highest possible bit which isn't
+		 * already set, but within the mask. The
+		 * higher bits are not important since the
+		 * page wasn't split */
+		hash &= mask;
+		int bit;
+		if (mask != -1)
+			bit = (mask + 1) >> 1;
+		else
+			bit = 1 << 31;
+		while ((hash & bit) != 0)
+		{
+			hash &= ~bit;
+			bit >>= 1;
+		}
+		hash |= bit;
+		/* set the mask to this value, no need to
+		 * reset it to 0, the lower bits are used
+		 * for sure */
+		mask = (bit << 1) - 1;
+		while (isSplit(mask, hash & mask))
+			mask = (mask << 1) + 1;
+
+		return new HashMask(hash, mask);
+	}
+
+	public byte[] nextKey(byte[] key)
+	throws DBException
+	{
+		if (key == null)
+		{
+			key = new byte[0];
+			if (get(key) != null)
+				return key;
+		}
+
+		int mask = 0;
+		int hash = computeHash(key);
+		while (isSplit(mask, hash & mask))
+			mask = (mask << 1) + 1;
+
+		PagPage currentPage = getPagPage(hash & mask);
+		byte[] next;
+		while ((next = currentPage.getNextKey(key)) == null)
+		{
+			HashMask hashMask = hashInc(hash, mask);
+			if (hashMask == null)
+				return null;
+
+			hash = hashMask.hash;
+			mask = hashMask.mask;
+			currentPage = getPagPage(hash & mask);
+			key = new byte[0];
+		}
+		return next;
+	}
+
+	public byte[] firstKey()
+	throws DBException
+	{
+		return nextKey(null);
+	}
+
 	private class AllKeysGetter
 	{
 		private int hash;
@@ -546,31 +660,12 @@ public class Dbm
 		{
 			while (!pageIterator.hasNext())
 			{
-				if ((hash | ~mask) == -1)
+				HashMask hashMask = hashInc(hash, mask);
+				if (hashMask == null)
 					return null;
 
-				/* set the highest possible bit which isn't
-				 * already set, but within the mask. The
-				 * higher bits are not important since the
-				 * page wasn't split */
-				hash &= mask;
-				int bit;
-				if (mask != -1)
-					bit = (mask + 1) >> 1;
-				else
-					bit = 1 << 31;
-				while ((hash & bit) != 0)
-				{
-					hash &= ~bit;
-					bit >>= 1;
-				}
-				hash |= bit;
-				/* set the mask to this value, no need to
-				 * reset it to 0, the lower bits are used
-				 * for sure */
-				mask = (bit << 1) - 1;
-				while (isSplit(mask, hash & mask))
-					mask = (mask << 1) + 1;
+				hash = hashMask.hash;
+				mask = hashMask.mask;
 
 				pageIterator = getPagPage(hash & mask).getAllKeys().iterator();
 			}
