@@ -147,7 +147,8 @@ class PagPage
 
 	public byte[] fetchKey(byte[] key)
 	{
-		return keyMap.get(new Datum(key)).content;
+		Datum value = keyMap.get(new Datum(key));
+		return (value != null) ? value.content : null;
 	}
 
 	public boolean writeKey(byte[] key, byte[] value)
