@@ -254,7 +254,7 @@ class PagPage
 				selectedNextDatum = otherKeyDatum;
 		}
 
-		if (selectedNextDatum != null && selectedNextDatum != previousKeyDatum)
+		if (selectedNextDatum != null)
 			return selectedNextDatum.content;
 
 		return null;
