@@ -244,13 +244,13 @@ class PagPage
 
 	public byte[] getNextKey(byte[] previousKey)
 	{
-		Datum previousKeyDatum = new Datum(previousKey);
+		Datum previousKeyDatum = (previousKey != null) ? new Datum(previousKey) : null;
 
 		Datum selectedNextDatum = null;
 		for (Datum otherKeyDatum : keyMap.keySet())
 		{
-			if (otherKeyDatum.compareTo(previousKeyDatum) > 0 &&
-			    (selectedNextDatum == null || otherKeyDatum.compareTo(selectedNextDatum) < 0))
+			if ((previousKeyDatum == null || otherKeyDatum.compareTo(previousKeyDatum) < 0) &&
+			    (selectedNextDatum == null || otherKeyDatum.compareTo(selectedNextDatum) > 0))
 				selectedNextDatum = otherKeyDatum;
 		}
 
@@ -607,15 +607,8 @@ public class Dbm
 	public byte[] nextKey(byte[] key)
 	throws DBException
 	{
-		if (key == null)
-		{
-			key = new byte[0];
-			if (get(key) != null)
-				return key;
-		}
-
 		int mask = 0;
-		int hash = computeHash(key);
+		int hash = (key != null) ? computeHash(key) : 0;
 		while (isSplit(mask, hash & mask))
 			mask = (mask << 1) + 1;
 
@@ -630,7 +623,7 @@ public class Dbm
 			hash = hashMask.hash;
 			mask = hashMask.mask;
 			currentPage = getPagPage(hash & mask);
-			key = new byte[0];
+			key = null;
 		}
 		return next;
 	}
