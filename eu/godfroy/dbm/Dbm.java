@@ -477,7 +477,7 @@ public class Dbm
 	throws DBException
 	{
 		if (mask == -1)
-			throw new InsertImpossibleException("Cannot split anymore!");
+			throw new InsertImpossibleDBException("Cannot split anymore!");
 
 		PagPage pagPage = getPagPage(pagNum);
 		long newPagNum = pagNum | ((mask + 1) & 0xffffffffl);
@@ -541,7 +541,7 @@ public class Dbm
 			pagPage = getPagPage(hash & mask);
 		}
 		if (mask == -1)
-			throw new InsertImpossibleException("Cannot insert key!");
+			throw new InsertImpossibleDBException("Cannot insert key!");
 		else
 			pagPage.writePage();
 	}
