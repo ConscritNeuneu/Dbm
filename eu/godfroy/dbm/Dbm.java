@@ -5,9 +5,17 @@ import java.io.*;
 import java.nio.*;
 import java.util.*;
 
-class PagPage
+public class Dbm
 {
-	public static final int PAGFILE_PGSZ = 1024;
+	private static final String PAG_EXT = ".pag";
+	private static final String DIR_EXT = ".dir";
+
+	private final RandomAccessFile pagFile;
+	private final RandomAccessFile dirFile;
+
+	/* also hold a PhantomReference to clear the mapping */
+	private final Map<Long,Reference<PagPage>> pagPages;
+	private final Map<Long,Reference<DirPage>> dirPages;
 
 	private static class Datum
 	implements Comparable<Datum>
@@ -47,278 +55,259 @@ class PagPage
 		}
 	};
 
-	private final RandomAccessFile pagFile;
-	private final long pagNum;
-	/* in octets : 2 + Sum_entries( 4 + key.length + data.length ) */
-	private int totalSize;
-	private boolean isDirty;
-	private final Map<Datum,Datum> keyMap;
-
-	public PagPage(RandomAccessFile pagFile, long pagNum)
-	throws DBException
+	private class PagPage
 	{
-		this.pagFile = pagFile;
-		this.pagNum = pagNum;
-		totalSize = 2;
-		isDirty = false;
-		keyMap = new HashMap<Datum,Datum>();
+		private static final int PAGFILE_PGSZ = 1024;
 
-		byte[] content = new byte[PAGFILE_PGSZ];
-		try
+		private final long pagNum;
+		/* in octets : 2 + Sum_entries( 4 + key.length + data.length ) */
+		private int totalSize;
+		private boolean isDirty;
+		private final Map<Datum,Datum> keyMap;
+
+		private PagPage(long pagNum)
+		throws DBException
 		{
-			pagFile.seek(pagNum * PAGFILE_PGSZ);
+			this.pagNum = pagNum;
+			totalSize = 2;
+			isDirty = false;
+			keyMap = new HashMap<Datum,Datum>();
+
+			byte[] content = new byte[PAGFILE_PGSZ];
 			try
 			{
-				pagFile.readFully(content);
+				pagFile.seek(pagNum * PAGFILE_PGSZ);
+				try
+				{
+					pagFile.readFully(content);
+					ByteBuffer contentBuf = ByteBuffer.wrap(content);
+					contentBuf.order(ByteOrder.LITTLE_ENDIAN);
+
+					int elements = contentBuf.getShort();
+					int lastPosition = PAGFILE_PGSZ;
+					byte[] currentKey = null;
+					for (int i = 0; i < elements; i++)
+					{
+						int nextPosition =  contentBuf.getShort();
+						byte[] data = new byte[lastPosition-nextPosition];
+						System.arraycopy(content, nextPosition, data, 0, data.length);
+
+						if (i % 2 == 0)
+							currentKey = data;
+						else
+							keyMap.put(new Datum(currentKey),new Datum(data));
+
+						lastPosition = nextPosition;
+						totalSize += data.length + 2;
+					}
+				}
+				catch (EOFException exception)
+				{
+					;
+				}
+				catch (IndexOutOfBoundsException exception)
+				{
+					keyMap.clear();
+					totalSize = 2;
+					throw new CorruptedDBException("Corrupted page " + pagNum, exception);
+				}
+			}
+			catch (IOException exception)
+			{
+				throw new IODBException(exception);
+			}
+		}
+
+		private void writePage()
+		throws DBException
+		{
+			if (isDirty)
+			{
+				byte[] content = new byte[PAGFILE_PGSZ];
 				ByteBuffer contentBuf = ByteBuffer.wrap(content);
 				contentBuf.order(ByteOrder.LITTLE_ENDIAN);
 
-				int elements = contentBuf.getShort();
+				contentBuf.putShort((short) (keyMap.size() * 2));
 				int lastPosition = PAGFILE_PGSZ;
-				byte[] currentKey = null;
-				for (int i = 0; i < elements; i++)
+				for (Map.Entry<Datum,Datum> pair : keyMap.entrySet())
 				{
-					int nextPosition =  contentBuf.getShort();
-					byte[] data = new byte[lastPosition-nextPosition];
-					System.arraycopy(content, nextPosition, data, 0, data.length);
+					for (int i = 0; i < 2; i++)
+					{
+						byte[] data;
 
-					if (i % 2 == 0)
-						currentKey = data;
-					else
-						keyMap.put(new Datum(currentKey),new Datum(data));
+						if (i % 2 == 0)
+							data = pair.getKey().content;
+						else
+							data = pair.getValue().content;
 
-					lastPosition = nextPosition;
-					totalSize += data.length + 2;
+						int nextPosition = lastPosition - data.length;
+						System.arraycopy(data, 0, content, nextPosition, data.length);
+						contentBuf.putShort((short) nextPosition);
+
+						lastPosition = nextPosition;
+					}
 				}
-			}
-			catch (EOFException exception)
-			{
-				;
-			}
-			catch (IndexOutOfBoundsException exception)
-			{
-				keyMap.clear();
-				totalSize = 2;
-				throw new CorruptedDBException("Corrupted page " + pagNum, exception);
+				try
+				{
+					synchronized(pagFile)
+					{
+						pagFile.seek(pagNum * PAGFILE_PGSZ);
+						pagFile.write(content);
+					}
+				}
+				catch (IOException exception)
+				{
+					throw new IODBException(exception);
+				}
+				isDirty = false;
 			}
 		}
-		catch (IOException exception)
+
+		protected void finalize()
+		throws Throwable
 		{
-			throw new IODBException(exception);
+			writePage();
+			super.finalize();
 		}
-	}
 
-	public void writePage()
-	throws DBException
-	{
-		if (isDirty)
+		private byte[] fetchKey(byte[] key)
 		{
-			byte[] content = new byte[PAGFILE_PGSZ];
-			ByteBuffer contentBuf = ByteBuffer.wrap(content);
-			contentBuf.order(ByteOrder.LITTLE_ENDIAN);
+			Datum value = keyMap.get(new Datum(key));
+			return (value != null) ? value.content : null;
+		}
 
-			contentBuf.putShort((short) (keyMap.size() * 2));
-			int lastPosition = PAGFILE_PGSZ;
-			for (Map.Entry<Datum,Datum> pair : keyMap.entrySet())
+		private boolean writeKey(byte[] key, byte[] value)
+		{
+			if (key.length + value.length + 6 > PAGFILE_PGSZ)
+				throw new IllegalArgumentException("Will never be able to insert: key+value too long!");
+
+			Datum originalValue = keyMap.get(new Datum(key));
+			if (originalValue != null)
 			{
-				for (int i = 0; i < 2; i++)
+				if (totalSize - originalValue.content.length + value.length <= PAGFILE_PGSZ)
 				{
-					byte[] data;
-
-					if (i % 2 == 0)
-						data = pair.getKey().content;
-					else
-						data = pair.getValue().content;
-
-					int nextPosition = lastPosition - data.length;
-					System.arraycopy(data, 0, content, nextPosition, data.length);
-					contentBuf.putShort((short) nextPosition);
-
-					lastPosition = nextPosition;
+					keyMap.put(new Datum(key), new Datum(value));
+					totalSize += value.length - originalValue.content.length;
+					isDirty = true;
+					return true;
 				}
 			}
-			try
+			else
 			{
-				synchronized(pagFile)
+				if (totalSize + 4 + key.length + value.length <= PAGFILE_PGSZ)
 				{
-					pagFile.seek(pagNum * PAGFILE_PGSZ);
-					pagFile.write(content);
+					keyMap.put(new Datum(key), new Datum(value));
+					totalSize += 4 + key.length + value.length;
+					isDirty = true;
+					return true;
 				}
 			}
-			catch (IOException exception)
-			{
-				throw new IODBException(exception);
-			}
-			isDirty = false;
+
+			/* need split */
+			return false;
 		}
-	}
 
-	protected void finalize()
-	throws Throwable
-	{
-		writePage();
-		super.finalize();
-	}
-
-	public byte[] fetchKey(byte[] key)
-	{
-		Datum value = keyMap.get(new Datum(key));
-		return (value != null) ? value.content : null;
-	}
-
-	public boolean writeKey(byte[] key, byte[] value)
-	{
-		if (key.length + value.length + 6 > PAGFILE_PGSZ)
-			throw new IllegalArgumentException("Will never be able to insert: key+value too long!");
-
-		Datum originalValue = keyMap.get(new Datum(key));
-		if (originalValue != null)
+		private byte[] removeKey(byte[] key)
 		{
-			if (totalSize - originalValue.content.length + value.length <= PAGFILE_PGSZ)
+			Datum datum = new Datum(key);
+
+			byte[] value = null;
+			if (keyMap.containsKey(datum))
 			{
-				keyMap.put(new Datum(key), new Datum(value));
-				totalSize += value.length - originalValue.content.length;
+				value = keyMap.remove(datum).content;
+				totalSize -= 4 + key.length + value.length;
 				isDirty = true;
-				return true;
 			}
+
+			return value;
 		}
-		else
+
+		private Iterable<byte[]> getAllKeys()
 		{
-			if (totalSize + 4 + key.length + value.length <= PAGFILE_PGSZ)
+			Set<Datum> keySet = keyMap.keySet();
+			final Iterator<Datum> internalIterator = keySet.iterator();
+
+			return new Iterable<byte[]>()
 			{
-				keyMap.put(new Datum(key), new Datum(value));
-				totalSize += 4 + key.length + value.length;
-				isDirty = true;
-				return true;
-			}
+				public Iterator<byte[]> iterator()
+				{
+					return new Iterator<byte[]>()
+					{
+						public boolean hasNext()
+						{
+							return internalIterator.hasNext();
+						}
+
+						public byte[] next()
+						{
+							return internalIterator.next().content;
+						}
+
+						public void remove()
+						{
+							throw new UnsupportedOperationException("Cannot remove a key this way!");
+						}
+					};
+				}
+			};
 		}
 
-		/* need split */
-		return false;
-	}
-
-	public byte[] removeKey(byte[] key)
-	{
-		Datum datum = new Datum(key);
-
-		byte[] value = null;
-		if (keyMap.containsKey(datum))
+		private byte[] getNextKey(byte[] previousKey)
 		{
-			value = keyMap.remove(datum).content;
-			totalSize -= 4 + key.length + value.length;
+			Datum previousKeyDatum = (previousKey != null) ? new Datum(previousKey) : null;
+
+			Datum selectedNextDatum = null;
+			for (Datum otherKeyDatum : keyMap.keySet())
+			{
+				if ((previousKeyDatum == null || otherKeyDatum.compareTo(previousKeyDatum) < 0) &&
+				    (selectedNextDatum == null || otherKeyDatum.compareTo(selectedNextDatum) > 0))
+					selectedNextDatum = otherKeyDatum;
+			}
+
+			if (selectedNextDatum != null)
+				return selectedNextDatum.content;
+
+			return null;
+		}
+
+		private void clear()
+		{
+			totalSize = 2;
+			keyMap.clear();
 			isDirty = true;
 		}
 
-		return value;
-	}
-
-	public Iterable<byte[]> getAllKeys()
-	{
-		Set<Datum> keySet = keyMap.keySet();
-		final Iterator<Datum> internalIterator = keySet.iterator();
-
-		return new Iterable<byte[]>()
+		private boolean isDirty()
 		{
-			public Iterator<byte[]> iterator()
-			{
-				return new Iterator<byte[]>()
-				{
-					public boolean hasNext()
-					{
-						return internalIterator.hasNext();
-					}
-
-					public byte[] next()
-					{
-						return internalIterator.next().content;
-					}
-
-					public void remove()
-					{
-						throw new UnsupportedOperationException("Cannot remove a key this way!");
-					}
-				};
-			}
-		};
-	}
-
-	public byte[] getNextKey(byte[] previousKey)
-	{
-		Datum previousKeyDatum = (previousKey != null) ? new Datum(previousKey) : null;
-
-		Datum selectedNextDatum = null;
-		for (Datum otherKeyDatum : keyMap.keySet())
-		{
-			if ((previousKeyDatum == null || otherKeyDatum.compareTo(previousKeyDatum) < 0) &&
-			    (selectedNextDatum == null || otherKeyDatum.compareTo(selectedNextDatum) > 0))
-				selectedNextDatum = otherKeyDatum;
+			return isDirty;
 		}
-
-		if (selectedNextDatum != null)
-			return selectedNextDatum.content;
-
-		return null;
 	}
 
-	public void clear()
+	private class DirPage
 	{
-		totalSize = 2;
-		keyMap.clear();
-		isDirty = true;
-	}
+		public static final int DIRFILE_PGSZ = 4096;
 
-	public boolean isDirty()
-	{
-		return isDirty;
-	}
-}
+		private final long pagNum;
+		private boolean isDirty;
+		private final byte[] data;
 
-class DirPage
-{
-	public static final int DIRFILE_PGSZ = 4096;
-
-	private final RandomAccessFile dirFile;
-	private final long pagNum;
-	private boolean isDirty;
-	private final byte[] data;
-
-	public DirPage(RandomAccessFile dirFile, long pagNum)
-	throws DBException
-	{
-		this.dirFile = dirFile;
-		this.pagNum = pagNum;
-		isDirty = false;
-
-		data = new byte[DIRFILE_PGSZ];
-		try
+		public DirPage(long pagNum)
+		throws DBException
 		{
-			dirFile.seek(pagNum * DIRFILE_PGSZ);
+			this.pagNum = pagNum;
+			isDirty = false;
+
+			data = new byte[DIRFILE_PGSZ];
 			try
 			{
-				dirFile.readFully(data);
-			}
-			catch (EOFException exception)
-			{
-				;
-			}
-		}
-		catch (IOException exception)
-		{
-			throw new IODBException(exception);
-		}
-	}
-
-	public void writePage()
-	throws DBException
-	{
-		if (isDirty)
-		{
-			try
-			{
-				synchronized(dirFile)
+				dirFile.seek(pagNum * DIRFILE_PGSZ);
+				try
 				{
-					dirFile.seek(pagNum * DIRFILE_PGSZ);
-					dirFile.write(data);
+					dirFile.readFully(data);
+				}
+				catch (EOFException exception)
+				{
+					;
 				}
 			}
 			catch (IOException exception)
@@ -326,49 +315,56 @@ class DirPage
 				throw new IODBException(exception);
 			}
 		}
+
+		public void writePage()
+		throws DBException
+		{
+			if (isDirty)
+			{
+				try
+				{
+					synchronized(dirFile)
+					{
+						dirFile.seek(pagNum * DIRFILE_PGSZ);
+						dirFile.write(data);
+					}
+				}
+				catch (IOException exception)
+				{
+					throw new IODBException(exception);
+				}
+			}
+		}
+
+		protected void finalize()
+		throws Throwable
+		{
+			writePage();
+			super.finalize();
+		}
+
+		public boolean getBit(long bitNum)
+		{
+			long localBit = bitNum - pagNum * DIRFILE_PGSZ * 8;
+
+			if (localBit < 0 || localBit >= DIRFILE_PGSZ * 8)
+				throw new IllegalArgumentException("Wrong DirPage!");
+
+			return ((((data[(int) localBit/8])>>(localBit%8))&1) == 1);
+		}
+
+		public void setBit(long bitNum)
+		{
+			long localBit = bitNum - pagNum * DIRFILE_PGSZ * 8;
+
+			 if (localBit < 0 || localBit >= DIRFILE_PGSZ * 8)
+				throw new IllegalArgumentException("Wrong DirPage!");
+
+			data[(int) localBit/8] |= (1 << (localBit % 8));
+
+			isDirty = true;
+		}
 	}
-
-	protected void finalize()
-	throws Throwable
-	{
-		writePage();
-		super.finalize();
-	}
-
-	public boolean getBit(long bitNum)
-	{
-		long localBit = bitNum - pagNum * DIRFILE_PGSZ * 8;
-
-		if (localBit < 0 || localBit >= DIRFILE_PGSZ * 8)
-			throw new IllegalArgumentException("Wrong DirPage!");
-
-		return ((((data[(int) localBit/8])>>(localBit%8))&1) == 1);
-	}
-
-	public void setBit(long bitNum)
-	{
-		long localBit = bitNum - pagNum * DIRFILE_PGSZ * 8;
-
-		 if (localBit < 0 || localBit >= DIRFILE_PGSZ * 8)
-			throw new IllegalArgumentException("Wrong DirPage!");
-
-		data[(int) localBit/8] |= (1 << (localBit % 8));
-
-		isDirty = true;
-	}
-}
-
-public class Dbm
-{
-	private static final String PAG_EXT = ".pag";
-	private static final String DIR_EXT = ".dir";
-
-	private final RandomAccessFile pagFile;
-	private final RandomAccessFile dirFile;
-
-	/* also hold a PhantomReference to clear the mapping */
-	private final Map<Long,Reference<PagPage>> pagPages;
-	private final Map<Long,Reference<DirPage>> dirPages;
 
 	public Dbm(String database)
 	throws IOException
@@ -433,7 +429,7 @@ public class Dbm
 			page = ref.get();
 		if (page == null)
 		{
-			page = new PagPage(pagFile, pagNum);
+			page = new PagPage(pagNum);
 			pagPages.put(pagNum, new SoftReference<PagPage>(page));
 		}
 
@@ -449,7 +445,7 @@ public class Dbm
 			page = ref.get();
 		if (page == null)
 		{
-			page = new DirPage(dirFile, pagNum);
+			page = new DirPage(pagNum);
 			dirPages.put(pagNum, new SoftReference<DirPage>(page));
 		}
 
