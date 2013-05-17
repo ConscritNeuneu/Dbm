@@ -13,6 +13,8 @@ public class Dbm
 	private final RandomAccessFile pagFile;
 	private final RandomAccessFile dirFile;
 
+	private final ByteOrder endianness;
+
 	/* also hold a PhantomReference to clear the mapping */
 	private final Map<Long,Reference<PagPage>> pagPages;
 	private final Map<Long,Reference<DirPage>> dirPages;
@@ -81,7 +83,7 @@ public class Dbm
 				{
 					pagFile.readFully(content);
 					ByteBuffer contentBuf = ByteBuffer.wrap(content);
-					contentBuf.order(ByteOrder.LITTLE_ENDIAN);
+					contentBuf.order(endianness);
 
 					int elements = contentBuf.getShort();
 					int lastPosition = PAGFILE_PGSZ;
@@ -125,7 +127,7 @@ public class Dbm
 			{
 				byte[] content = new byte[PAGFILE_PGSZ];
 				ByteBuffer contentBuf = ByteBuffer.wrap(content);
-				contentBuf.order(ByteOrder.LITTLE_ENDIAN);
+				contentBuf.order(endianness);
 
 				contentBuf.putShort((short) (keyMap.size() * 2));
 				int lastPosition = PAGFILE_PGSZ;
@@ -366,17 +368,25 @@ public class Dbm
 		}
 	}
 
-	public Dbm(String database)
+	public Dbm(String database, String fileOptions, ByteOrder endianness)
 	throws IOException
 	{
 		File pagF = new File(database + PAG_EXT);
 		File dirF = new File(database + DIR_EXT);
 
-		pagFile = new RandomAccessFile(pagF, "rw");
-		dirFile = new RandomAccessFile(dirF, "rw");
+		pagFile = new RandomAccessFile(pagF, fileOptions);
+		dirFile = new RandomAccessFile(dirF, fileOptions);
+
+		this.endianness = endianness;
 
 		pagPages = new TreeMap<Long,Reference<PagPage>>();
 		dirPages = new TreeMap<Long,Reference<DirPage>>();
+	}
+
+	public Dbm(String database)
+	throws IOException
+	{
+		this(database, "rw", ByteOrder.LITTLE_ENDIAN);
 	}
 
 	private static byte[] hitab = new byte[] {
