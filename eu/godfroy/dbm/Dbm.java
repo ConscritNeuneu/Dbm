@@ -383,10 +383,16 @@ public class Dbm
 		dirPages = new TreeMap<Long,Reference<DirPage>>();
 	}
 
+	public Dbm(String database, String fileOptions)
+	throws IOException
+	{
+		this(database, fileOptions, ByteOrder.LITTLE_ENDIAN);
+	}
+
 	public Dbm(String database)
 	throws IOException
 	{
-		this(database, "rw", ByteOrder.LITTLE_ENDIAN);
+		this(database, "rw");
 	}
 
 	private static byte[] hitab = new byte[] {
