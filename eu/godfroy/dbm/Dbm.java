@@ -494,6 +494,8 @@ public class Dbm
 		PagPage pagPage = getPagPage(pagNum);
 		long newPagNum = pagNum | ((mask + 1) & 0xffffffffl);
 		PagPage newPagPage = getPagPage(newPagNum);
+		if (newPagPage.totalSize != 2)
+			throw new CorruptedDBException("Page is not empty!");
 
 		List<byte[]> keys = new ArrayList<byte[]>();
 		List<byte[]> values = new ArrayList<byte[]>();
@@ -523,8 +525,8 @@ public class Dbm
 		}
 
 		markSplit(mask, pagNum);
-		pagPage.writePage();
 		newPagPage.writePage();
+		pagPage.writePage();
 	}
 
 	public byte[] get(byte[] key)
