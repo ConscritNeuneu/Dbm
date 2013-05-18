@@ -495,7 +495,7 @@ public class Dbm
 		long newPagNum = pagNum | ((mask + 1) & 0xffffffffl);
 		PagPage newPagPage = getPagPage(newPagNum);
 		if (newPagPage.totalSize != 2)
-			throw new CorruptedDBException("Page is not empty!");
+			throw new CorruptedDBException("Page " + newPagNum + " is not empty!");
 
 		List<byte[]> keys = new ArrayList<byte[]>();
 		List<byte[]> values = new ArrayList<byte[]>();
@@ -517,7 +517,7 @@ public class Dbm
 			int hash = computeHash(key);
 			long page = (hash & newMask) & 0xffffffffl;
 			if (page != pagNum && page != newPagNum)
-				throw new CorruptedDBException("Content pair is not in right page!");
+				throw new CorruptedDBException("Content pair from page " + pagNum + " is not in right page!");
 			if (page == pagNum)
 				pagPage.writeKey(key, value);
 			else
