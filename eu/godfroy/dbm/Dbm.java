@@ -524,8 +524,8 @@ public class Dbm
 				newPagPage.writeKey(key, value);
 		}
 
-		markSplit(mask, pagNum);
 		newPagPage.writePage();
+		markSplit(mask, pagNum);
 		pagPage.writePage();
 	}
 
