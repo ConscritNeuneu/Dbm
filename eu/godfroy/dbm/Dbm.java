@@ -5,6 +5,29 @@ import java.io.*;
 import java.nio.*;
 import java.util.*;
 
+/**
+ * A public domain reimplementation of the DBM package from Unix v7.
+ *
+ * The files are binary compatible with the original implementation, as well
+ * as the ones produced by the NDBM package originated in
+ * 4.3BSD, and used in various unices since then.
+ * <p>
+ * This class allows to insert arbitrary pairs of key, value represented as
+ * <code>byte[]</code>, of combined length no more than 1018 octets. It has
+ * no provision for overflow pages, and keys that hash together must fit in
+ * a single page.
+ * <p>
+ * A database is comprised of two files: <code>database.pag</code> which
+ * contains the pages with the key, values inserted, and
+ * <code>database.dir</code>, which is an index of the pages.
+ * <p>
+ * The produced files are sparse, and care must be taken when copying them
+ * using traditional Unix tools. While not detrimental to the database
+ * integrity, a dumb copy can provoke a large increase in the effective size
+ * taken by the files on the filesystem.
+ *
+ * @author Quentin Godfroy <quentin@godroy.eu>
+ */
 public class Dbm
 {
 	private static final String PAG_EXT = ".pag";
@@ -368,6 +391,22 @@ public class Dbm
 		}
 	}
 
+	/**
+	 * Connect to the database with the specified file options and
+	 * endianness.
+	 *
+	 * Files <code>database + ".pag"</code> and <code>database +
+	 * ".dir"</code> will be opened as {@link java.io.RandomAccessFile}
+	 * with mode as specified by <code>fileOptions</code>. The database
+	 * will be opened using the specified endianness.
+	 *
+	 * @param database The files <code>database + ".pag"</code> and
+	 * <code>database + ".dir"</code> will be attempted to be opened.
+	 * @param fileOptions Mode of opening, as specified by the
+	 * <code>mode</code> of {@link java.io.RandomAccessFile}.
+	 * @param endianness Either {@link java.nio.ByteOrder#LITTLE_ENDIAN}
+	 * or {@link java.nio.ByteOrder#BIG_ENDIAN}.
+	 */
 	public Dbm(String database, String fileOptions, ByteOrder endianness)
 	throws IOException
 	{
@@ -383,12 +422,29 @@ public class Dbm
 		dirPages = new TreeMap<Long,Reference<DirPage>>();
 	}
 
+	/**
+	 * Connect to the database with the specified file options.
+	 *
+	 * Files <code>database + ".pag"</code> and <code>database + ".dir"</code> will be opened as
+	 * {@link java.io.RandomAccessFile} with mode as specified by
+	 * <code>fileOptions</code>. The database will be assumed to be
+	 * in little endian format. To specify the endianness, see {@link #Dbm(String, String, java.nio.ByteOrder)}.
+	 *
+	 * @param database The files <code>database + ".pag"</code> and <code>database
+	 * + ".dir"</code> will be attempted to be opened.
+	 * @param fileOptions Mode of opening, as specified by the
+	 * <code>mode</code> of {@link java.io.RandomAccessFile}.
+	 */
 	public Dbm(String database, String fileOptions)
 	throws IOException
 	{
 		this(database, fileOptions, ByteOrder.LITTLE_ENDIAN);
 	}
 
+	/** Connect to a database with default options.
+	 *
+	 * See the other constructors for more options.
+	 */
 	public Dbm(String database)
 	throws IOException
 	{
@@ -529,6 +585,17 @@ public class Dbm
 		pagPage.writePage();
 	}
 
+	/**
+	 * Get the value associated with key.
+	 *
+	 * @param key Key to be searched for.
+	 * @return Value associated with key if key exists, else
+	 * <code>null</code>.
+	 * @throws CorruptedDBException if the database is corrupted or
+	 * opened with the wrong endianness.
+	 * @throws IODBException in case the reads on either backing file
+	 * produces an {@link java.io.IOException}.
+	 */
 	public byte[] get(byte[] key)
 	throws DBException
 	{
@@ -540,6 +607,23 @@ public class Dbm
 		return pagPage.fetchKey(key);
 	}
 
+	/**
+	 * Insert a key, value pair into the database.
+	 *
+	 * @param key Key to be inserted.
+	 * @param value Value to be inserted.
+	 *
+	 * @throws CorruptedDBException if the database is corrupted or
+	 * opened with the wrong endianness.
+	 * @throws IODBException in case one of the reads or write on either
+	 * backing files produce an {@link java.io.IOException}. In particular this happens
+	 * if the database has been opened read-only.
+	 * @throws InsertImpossibleDBException when the insert failed for a
+	 * reason inherent to the DBM format. For instance, if
+	 * <code>key.length + value.length &gt; 1018</code> or if the key
+	 * hashes together with another different key already in database
+	 * and their combined length exceed the maximum admissible size.
+	 */
 	public void put(byte[] key, byte[] value)
 	throws DBException
 	{
@@ -560,6 +644,18 @@ public class Dbm
 			pagPage.writePage();
 	}
 
+	/**
+	 * Remove a key from the map.
+	 *
+	 * @param key Key to be removed.
+	 * @return The value associated with key if it exists.
+	 * <code>null</code> instead.
+	 * @throws CorruptedDBException if the database is corrupted or
+	 * opened with the wrong endianness.
+	 * @throws IODBException in case one of the reads or write on either
+	 * backing files produce an {@link java.io.IOException}. In particular this
+	 * happensif the database has been opened read-only.
+	 */
 	public byte[] remove(byte[] key)
 	throws DBException
 	{
@@ -618,6 +714,21 @@ public class Dbm
 		return new HashMask(hash, mask);
 	}
 
+	/**
+	 * Returns the next key following the provided key passed in
+	 * parameter.
+	 *
+	 * The keys are returned in the same order as the original DBM
+	 * library. This method is completely stateless.
+	 *
+	 * @param key The last returned key.
+	 * @return The next following key, if it exists. A value of
+	 * <code>null</code> indicated that no more keys are available.
+	 * @throws CorruptedDBException if the database is corrupted or opened
+	 * with the wrong endianness.
+	 * @throws IODBException in case one of the reads on either backing
+	 * file produced an {@link java.io.IOException}.
+	 */
 	public byte[] nextKey(byte[] key)
 	throws DBException
 	{
@@ -642,6 +753,18 @@ public class Dbm
 		return next;
 	}
 
+	/**
+	 * Obtain the first key.
+	 *
+	 * Call this method in order to start a traversal of all the keys.
+	 *
+	 * @return The first key of the database. <code>null</code> if the
+	 * database is empty.
+	 * @throws CorruptedDBException if the database is corrupted or
+	 * opened with the wrong endianness.
+	 * @throws IODBException in case one of the reads on either backing
+	 * file produced an {@link java.io.IOException}.
+	 */
 	public byte[] firstKey()
 	throws DBException
 	{
@@ -680,6 +803,23 @@ public class Dbm
 		}
 	}
 
+	/**
+	 * Stateful traversal method.
+	 *
+	 * Call this method to obtain an Iterable suitable for <code>for in</code>
+	 * loops. The keys are produced in an undefined order.
+	 * <p>
+	 * The <code>iterable()</code> method and the respective methods of the returned
+	 * iterator can throw {@link java.lang.RuntimeException}, with
+	 * {@link IODBException} or {@link CorruptedDBException} as a cause.
+	 * <p>
+	 * The {@link IODBException} indicates that an
+	 * {@link java.io.IOException} was encountered while reading the underlying
+	 * files. The {@link CorruptedDBException} indicates that the database is
+	 * corrupted or that it was opened with the wrong endianness.
+	 *
+	 * @return An iterable usable in a <code>for in</code> loop.
+	 */
 	/* returns a RuntimeException as a cause of an unchecked DBException */
 	public Iterable<byte[]> allKeys()
 	{
