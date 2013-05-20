@@ -26,7 +26,7 @@ import java.util.*;
  * integrity, a dumb copy can provoke a large increase in the effective size
  * taken by the files on the filesystem.
  *
- * @author Quentin Godfroy <quentin@godroy.eu>
+ * @author Quentin Godfroy <quentin@godfroy.eu>
  */
 public class Dbm
 {
