@@ -33,6 +33,27 @@ public class Dbm
 	private static final String PAG_EXT = ".pag";
 	private static final String DIR_EXT = ".dir";
 
+	/**
+	 * Enum which represents the two endianness.
+	 */
+	public static enum Endianness
+	{
+		BIG_ENDIAN(ByteOrder.BIG_ENDIAN),
+		LITTLE_ENDIAN(ByteOrder.LITTLE_ENDIAN);
+
+		private final ByteOrder order;
+
+		Endianness(ByteOrder order)
+		{
+			this.order = order;
+		}
+
+		private ByteOrder getEndianness()
+		{
+			return order;
+		}
+	}
+
 	private final RandomAccessFile pagFile;
 	private final RandomAccessFile dirFile;
 
@@ -404,10 +425,10 @@ public class Dbm
 	 * <code>database + ".dir"</code> will be attempted to be opened.
 	 * @param fileOptions Mode of opening, as specified by the
 	 * <code>mode</code> of {@link java.io.RandomAccessFile}.
-	 * @param endianness Either {@link java.nio.ByteOrder#LITTLE_ENDIAN}
-	 * or {@link java.nio.ByteOrder#BIG_ENDIAN}.
+	 * @param endianness Either {@link Endianness#LITTLE_ENDIAN}
+	 * or {@link Endianness#BIG_ENDIAN}.
 	 */
-	public Dbm(String database, String fileOptions, ByteOrder endianness)
+	public Dbm(String database, String fileOptions, Endianness endianness)
 	throws IOException
 	{
 		File pagF = new File(database + PAG_EXT);
@@ -416,7 +437,7 @@ public class Dbm
 		pagFile = new RandomAccessFile(pagF, fileOptions);
 		dirFile = new RandomAccessFile(dirF, fileOptions);
 
-		this.endianness = endianness;
+		this.endianness = endianness.getEndianness();
 
 		pagPages = new TreeMap<Long,Reference<PagPage>>();
 		dirPages = new TreeMap<Long,Reference<DirPage>>();
@@ -428,7 +449,7 @@ public class Dbm
 	 * Files <code>database + ".pag"</code> and <code>database + ".dir"</code> will be opened as
 	 * {@link java.io.RandomAccessFile} with mode as specified by
 	 * <code>fileOptions</code>. The database will be assumed to be
-	 * in little endian format. To specify the endianness, see {@link #Dbm(String, String, java.nio.ByteOrder)}.
+	 * in little endian format. To specify the endianness, see {@link #Dbm(String, String, Endianness)}.
 	 *
 	 * @param database The files <code>database + ".pag"</code> and <code>database
 	 * + ".dir"</code> will be attempted to be opened.
@@ -438,7 +459,7 @@ public class Dbm
 	public Dbm(String database, String fileOptions)
 	throws IOException
 	{
-		this(database, fileOptions, ByteOrder.LITTLE_ENDIAN);
+		this(database, fileOptions, Endianness.LITTLE_ENDIAN);
 	}
 
 	/** Connect to a database with default options.
