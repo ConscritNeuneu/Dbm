@@ -1,0 +1,5 @@
+This talk is dedicated to the concept of hash tables. After a small
+introduction about databases and their uses of hash tables, we focus on an
+early example of a disk-stored hash table devised by Ken Thompson for
+UNIXv7. We discuss its limitations and how the concept can be reused as one
+of the building block of modern databases.
